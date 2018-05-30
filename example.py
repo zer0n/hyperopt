@@ -4,6 +4,7 @@ from pandas import DataFrame
 import numpy as np
 import argparse
 import matplotlib.pyplot as plt
+import pandas as pd
 
 
 test_config = dict(
@@ -43,7 +44,8 @@ if __name__ == '__main__':
 
     plot_data = []
     for _ in range(args.num_iter):
-        data = suggest(data, space, num_trials=args.num_trials)
+        new_points = suggest(data, space, num_trials=args.num_trials)
+        data = pd.concat((data, new_points), ignore_index=True)
         for index in [-j for j in range(args.num_trials)]:
             index = len(data) - 1 + index
             data.set_value(index, 'loss', func(data.iloc[index].tolist()))

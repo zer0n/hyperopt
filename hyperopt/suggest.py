@@ -82,9 +82,10 @@ def suggest(data: DataFrame, space=None, num_trials=3):
         trial['state'] = base.JOB_STATE_DONE
         trial['result'] = result
         trial['refresh_time'] = coarse_utcnow()
-    trials.insert_trial_docs(new_trials)
+    out_trials = base.Trials()
+    out_trials.insert_trial_docs(new_trials)
 
-    out_data = trials_to_dataframe(trials)
+    out_data = trials_to_dataframe(out_trials)
 
     return out_data
 # -- flake8 doesn't like blank last line
