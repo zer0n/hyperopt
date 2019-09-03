@@ -44,8 +44,8 @@ except ImportError:
 from . import pyll
 from .pyll.stochastic import recursive_set_rng_kwarg
 
-from .exceptions import (
-    DuplicateLabel, InvalidTrial, InvalidResultStatus, InvalidLoss)
+from .exceptions import (DuplicateLabel, InvalidTrial, InvalidResultStatus,
+                         InvalidLoss, AllTrialsFailed)
 from .utils import pmin_sampled
 from .utils import use_obj_for_literal_in_memo
 from .vectorize import VectorizeHelper
@@ -263,7 +263,7 @@ class Trials(object):
 
     """
 
-    async = False
+    asynchronous = False
 
     def __init__(self, exp_key=None, refresh=True):
         self._ids = set()
@@ -580,6 +580,8 @@ class Trials(object):
         """
         candidates = [t for t in self.trials
                       if t['result']['status'] == STATUS_OK]
+        if not candidates:
+            raise AllTrialsFailed
         losses = [float(t['result']['loss']) for t in candidates]
         assert not np.any(np.isnan(losses))
         best = np.argmin(losses)
@@ -598,11 +600,13 @@ class Trials(object):
         return rval
 
     def fmin(self, fn, space, algo, max_evals,
+             max_queue_len=1,
              rstate=None,
              verbose=0,
              pass_expr_memo_ctrl=None,
              catch_eval_exceptions=False,
              return_argmin=True,
+             show_progressbar=True,
              ):
         """Minimize a function over a hyperparameter space.
 
@@ -618,6 +622,8 @@ class Trials(object):
             error jobs (JOB_STATE_ERROR).  If set to False, such exceptions
             will not be caught, and so they will propagate to calling code.
 
+        show_progressbar : bool, default True
+            Show a progressbar.
 
         """
         # -- Stop-gap implementation!
@@ -629,10 +635,12 @@ class Trials(object):
             trials=self,
             rstate=rstate,
             verbose=verbose,
+            max_queue_len=max_queue_len,
             allow_trials_fmin=False,  # -- prevent recursion
             pass_expr_memo_ctrl=pass_expr_memo_ctrl,
             catch_eval_exceptions=catch_eval_exceptions,
-            return_argmin=return_argmin)
+            return_argmin=return_argmin,
+            show_progressbar=show_progressbar)
 
 
 def trials_from_docs(docs, validate=True, **kwargs):

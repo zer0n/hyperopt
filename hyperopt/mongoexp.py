@@ -93,7 +93,6 @@ from __future__ import print_function
 from __future__ import absolute_import
 from future import standard_library
 import copy
-import six.moves.cPickle as pickle
 # import hashlib
 import logging
 import optparse
@@ -135,6 +134,12 @@ __contact__ = "github.com/hyperopt/hyperopt"
 
 standard_library.install_aliases()
 logger = logging.getLogger(__name__)
+
+try:
+    import dill as pickler
+except Exception as e:
+    logger.info('Failed to load dill, try installing dill via "pip install dill" for enhanced pickling support.')
+    import six.moves.cPickle as pickler
 
 
 class OperationFailure(Exception):
@@ -222,7 +227,8 @@ def parse_url(url, pwfile=None):
             password = None
     else:
         password = tmp.password
-    logger.info('PASS %s' % password)
+    if password is not None:
+        logger.info('PASS ***')
     port = int(float(tmp.port))  # port has to be casted explicitly here.
 
     return (protocol, tmp.username, password, tmp.hostname, port, dbname, collection, authdbname)
@@ -653,7 +659,7 @@ class MongoTrials(Trials):
     interface directly.  When you are done writing, call refresh() or
     refresh_tids() to bring the MongoTrials up to date.
     """
-    async = True
+    asynchronous = True
 
     def __init__(self, arg, exp_key=None, cmd=None, workdir=None,
                  refresh=True):
@@ -746,7 +752,7 @@ class MongoTrials(Trials):
                                               str(numpy.random.randint(1e8)) + '.pkl')
                     logger.error('HYPEROPT REFRESH ERROR: writing error file to %s' % reportpath)
                     _file = open(reportpath, 'w')
-                    pickle.dump({'db_data': db_data,
+                    pickler.dump({'db_data': db_data,
                                  'existing_data': existing_data},
                                 _file)
                     _file.close()
@@ -1045,9 +1051,9 @@ class MongoWorker(object):
             cmd_protocol = cmd[0]
             try:
                 if cmd_protocol == 'cpickled fn':
-                    worker_fn = pickle.loads(cmd[1])
+                    worker_fn = pickler.loads(cmd[1])
                 elif cmd_protocol == 'call evaluate':
-                    bandit = pickle.loads(cmd[1])
+                    bandit = pickler.loads(cmd[1])
                     worker_fn = bandit.evaluate
                 elif cmd_protocol == 'token_load':
                     cmd_toks = cmd[1].split('.')
@@ -1059,17 +1065,17 @@ class MongoWorker(object):
                 elif cmd_protocol == 'driver_attachment':
                     # name = 'driver_attachment_%s' % job['exp_key']
                     blob = ctrl.trials.attachments[cmd[1]]
-                    bandit_name, bandit_args, bandit_kwargs = pickle.loads(blob)
+                    bandit_name, bandit_args, bandit_kwargs = pickler.loads(blob)
                     worker_fn = json_call(bandit_name,
                                           args=bandit_args,
                                           kwargs=bandit_kwargs).evaluate
                 elif cmd_protocol == 'domain_attachment':
                     blob = ctrl.trials.attachments[cmd[1]]
                     try:
-                        domain = pickle.loads(blob)
+                        domain = pickler.loads(blob)
                     except BaseException as e:
                         logger.info(
-                            'Error while unpickling. Try installing dill via "pip install dill" for enhanced pickling support.')
+                            'Error while unpickling.')
                         raise
                     worker_fn = domain.evaluate
                 else:
@@ -1182,11 +1188,12 @@ def main_worker_helper(options, args):
     def sighandler_wait_quit(signum, frame):
         logger.info('Caught signal %i, shutting down.' % signum)
         raise WaitQuit(signum)
-
+    is_windows = os.name == 'nt'
+    if not is_windows:
+        signal.signal(signal.SIGHUP, sighandler_shutdown)
+        signal.signal(signal.SIGUSR1, sighandler_wait_quit)
     signal.signal(signal.SIGINT, sighandler_shutdown)
-    signal.signal(signal.SIGHUP, sighandler_shutdown)
     signal.signal(signal.SIGTERM, sighandler_shutdown)
-    signal.signal(signal.SIGUSR1, sighandler_wait_quit)
 
     if N > 1:
         proc = None
@@ -1197,30 +1204,43 @@ def main_worker_helper(options, args):
 
         while N and cons_errs < int(options.max_consecutive_failures):
             try:
-                # recursive Popen, dropping N from the argv
-                # By using another process to run this job
-                # we protect ourselves from memory leaks, bad cleanup
-                # and other annoying details.
-                # The tradeoff is that a large dataset must be reloaded once for
-                # each subprocess.
-                sub_argv = [sys.argv[0],
-                            '--poll-interval=%s' % options.poll_interval,
-                            '--max-jobs=1',
-                            '--mongo=%s' % options.mongo,
-                            '--reserve-timeout=%s' % options.reserve_timeout]
-                if options.workdir is not None:
-                    sub_argv.append('--workdir=%s' % options.workdir)
-                if options.exp_key is not None:
-                    sub_argv.append('--exp-key=%s' % options.exp_key)
-                proc = subprocess.Popen(sub_argv)
-                retcode = proc.wait()
-                proc = None
+                if options.use_subprocesses:
+                    # recursive Popen, dropping N from the argv
+                    # By using another process to run this job
+                    # we protect ourselves from memory leaks, bad cleanup
+                    # and other annoying details.
+                    # The tradeoff is that a large dataset must be reloaded once for
+                    # each subprocess.
+                    sub_argv = [sys.argv[0],
+                                '--poll-interval=%s' % options.poll_interval,
+                                '--max-jobs=1',
+                                '--mongo=%s' % options.mongo,
+                                '--reserve-timeout=%s' % options.reserve_timeout]
+                    if options.workdir is not None:
+                        sub_argv.append('--workdir=%s' % options.workdir)
+                    if options.exp_key is not None:
+                        sub_argv.append('--exp-key=%s' % options.exp_key)
+                    proc = subprocess.Popen(sub_argv)
+                    retcode = proc.wait()
+                    proc = None
+                else:
+                    current_mongo_str = as_mongo_str(options.mongo)
+                    # Remove this if not necessary:
+                    if "/jobs" not in current_mongo_str:
+                        current_mongo_str += '/jobs'
+                    mj = MongoJobs.new_from_connection_str(current_mongo_str)
 
+                    mworker = MongoWorker(mj,
+                                          float(options.poll_interval),
+                                          workdir=options.workdir,
+                                          exp_key=options.exp_key)
+                    mworker.run_one(reserve_timeout=float(options.reserve_timeout))
+                    retcode = 0
             except Shutdown:
                 # this is the normal way to stop the infinite loop (if originally N=-1)
                 if proc:
                     # proc.terminate() is only available as of 2.6
-                    os.kill(proc.pid, signal.SIGTERM)
+                    os.kill(proc.pid, signal.CTRL_C_EVENT if is_windows else signal.SIGTERM)
                     return proc.wait()
                 else:
                     return 0
@@ -1255,6 +1275,9 @@ def main_worker_helper(options, args):
     else:
         raise ValueError("N <= 0")
 
+def main():
+    logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+    sys.exit(main_worker())
 
 def main_worker():
     parser = optparse.OptionParser(usage="%prog [options]")
@@ -1297,6 +1320,11 @@ def main_worker():
                       default=None,
                       help="root workdir (default: load from mongo)",
                       metavar="DIR")
+    parser.add_option("--no-subprocesses",
+                      dest="use_subprocesses",
+                      default=True,
+                      action="store_false",
+                      help="do not use sub-processes for each objective evaluation, the objective function will run in the same python process (useful to keep in memory large data across objective evals) but you have to pay attention to memory leaks (default: False)")
 
     (options, args) = parser.parse_args()
 

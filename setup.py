@@ -110,14 +110,16 @@ if package_name is None:
 if package_data is None:
     package_data = find_package_data(packages)
 
-if scripts is None:
-    scripts = find_scripts()
 
 setuptools.setup(
     name=package_name,
-    version='0.1',
+    version='0.1.2',
     packages=packages,
-    scripts=scripts,
+    entry_points={
+        'console_scripts': [
+            'hyperopt-mongo-worker=hyperopt.mongoexp:main'
+        ],
+    },
     url='http://hyperopt.github.com/hyperopt/',
     author='James Bergstra',
     author_email='james.bergstra@gmail.com',
@@ -145,6 +147,10 @@ setuptools.setup(
     keywords='Bayesian optimization hyperparameter model selection',
     package_data=package_data,
     include_package_data=True,
-    install_requires=['numpy', 'scipy', 'nose', 'pymongo', 'six', 'networkx', 'future'],
+    install_requires=['numpy', 'scipy', 'pymongo', 'six', 'networkx==2.2', 'future', 'tqdm'],
+    extras_require={
+        'dill': 'dill'
+    },
+    tests_require=['nose'],
     zip_safe=False
 )

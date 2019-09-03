@@ -110,6 +110,35 @@ def test_set_fmin_rstate():
     assert argmin_seed0 != argmin_seed1
 
 
+def test_fmin_return_argmin():
+    fn = lambda x: x
+    space = hp.choice('x', [100, 5, 10])
+
+    # With return_argmin=False it should return the
+    # best parameter values
+    best_parameter = fmin(
+        fn=fn,
+        space=space,
+        max_evals=10,
+        algo=rand.suggest,
+        return_argmin=False,
+        rstate=np.random.RandomState(0)
+    )
+    assert best_parameter == 5
+
+    # With return_argmin=True it should return the
+    # optimal point in ths sample space
+    best_args = fmin(
+        fn=fn,
+        space=space,
+        max_evals=10,
+        algo=rand.suggest,
+        return_argmin=True,
+        rstate=np.random.RandomState(0)
+    )
+    assert best_args['x'] == 1
+
+
 class TestFmin(unittest.TestCase):
 
     class SomeError(Exception):
@@ -169,3 +198,17 @@ def test_status_fail_tpe():
     assert argmin['x'] < 0, argmin
     assert 'loss' in trials.best_trial['result'], 'loss' in trials.best_trial['result']
     assert trials.best_trial['result']['loss'] >= 9, trials.best_trial['result']['loss']
+
+
+class TestGenerateTrialsToCalculate(unittest.TestCase):
+    def test_generate_trials_to_calculate(self):
+        points = [{'x': 0.0, 'y': 0.0}, {'x': 1.0, 'y': 1.0}]
+        best = fmin(fn=lambda space: space['x'] ** 2 + space['y'] ** 2,
+                    space={'x': hp.uniform('x', -10, 10),
+                           'y': hp.uniform('y', -10, 10)},
+                    algo=tpe.suggest,
+                    max_evals=10,
+                    points_to_evaluate=points
+                    )
+        assert best['x'] == 0.0
+        assert best['y'] == 0.0
